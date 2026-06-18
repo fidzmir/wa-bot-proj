@@ -220,20 +220,14 @@ async function startSystem() {
 
         // Fallback for external macro links
         // Fallback for external macro links (Ditambahkan proteksi try-catch & timeout)
-        if (text.startsWith('/')) {
-            try {
-                const res = await axios.post(ORIGINAL_BOT_URL, { 
-                    command: text, 
-                    sender: jid 
-                }, { timeout: 15000 }); // ⏱️ Batas nunggu 15 detik, jika lebih dianggap batal
-                
-                if (res && res.data && res.data.type === 'text') {
-                    await sock.sendMessage(jid, { text: res.data.content });
-                }
-            } catch (error) {
-                console.error("⚠️ Gagal memproses perintah eksternal:", error.message);
-                await sock.sendMessage(jid, { 
-                    text: "⚠️ Server database sedang sibuk/timeout. Silakan coba perintah beberapa saat lagi." 
-                });
-            }
+       if (text.startsWith('/')) {
+            const res = await axios.post(ORIGINAL_BOT_URL, { command: text, sender: jid });
+            if (res.data.type === 'text') await sock.sendMessage(jid, { text: res.data.content });
         }
+    }); // 👈 Penutup messages.upsert
+} // 👈 SINI MASALAHNYA! Penutup fungsi async function startSystem() KETINGGALAN / TERHAPUS sebelum app.listen
+
+app.listen(WEBHOOK_PORT, "0.0.0.0", () => {
+    console.log(`🚀 Server on port ${WEBHOOK_PORT}`);
+    startSystem();
+});
