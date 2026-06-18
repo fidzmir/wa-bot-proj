@@ -96,7 +96,6 @@ async function startSystem() {
         if (connection === 'open') {
             console.log("✅ WHATSAPP TERHUBUNG!");
             if (sock.user?.id) heartbeat.start(sock, sock.user.id);
-            // Bagian loop game yang merusak event loop sudah dihapus sepenuhnya dari sini
         } 
         
         else if (connection === 'close') {
@@ -219,13 +218,12 @@ async function startSystem() {
         }
 
         // Fallback for external macro links
-        // Fallback for external macro links (Ditambahkan proteksi try-catch & timeout)
-       if (text.startsWith('/')) {
+        if (text.startsWith('/')) {
             const res = await axios.post(ORIGINAL_BOT_URL, { command: text, sender: jid });
             if (res.data.type === 'text') await sock.sendMessage(jid, { text: res.data.content });
         }
-    }); // 👈 Penutup messages.upsert
-} // 👈 SINI MASALAHNYA! Penutup fungsi async function startSystem() KETINGGALAN / TERHAPUS sebelum app.listen
+    });
+}
 
 app.listen(WEBHOOK_PORT, "0.0.0.0", () => {
     console.log(`🚀 Server on port ${WEBHOOK_PORT}`);
