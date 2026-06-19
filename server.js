@@ -149,21 +149,34 @@ async function startSystem() {
         }
 
        
-        // ==================== [ TAMBAHAN: HANDLER /CEK ] ====================
+// ==================== [ FIX HANDLER /CEK ] ====================
         if (text.toLowerCase().startsWith("/cek")) {
             try {
-                // Kirim tanda bot sedang mengetik agar user tahu bot bekerja
                 await sock.sendPresenceUpdate('composing', jid);
                 
                 const res = await axios.post(ORIGINAL_BOT_URL, { 
                     command: text, 
                     sender: jid 
-                }, { timeout: 15000 }); // Batas aman nunggu Google Apps Script 15 detik
+                }, { timeout: 15000 });
                 
+                // Pancing Log untuk melihat kiriman asli dari Google Spreadsheet di terminal
+                console.log("Diterima dari Google:", JSON.stringify(res.data));
+                
+                // JIKA formatnya JSON standar { type: 'text', content: '...' }
                 if (res && res.data && res.data.type === 'text') {
                     return await sock.sendMessage(jid, { text: res.data.content });
-                } else {
-                    return await sock.sendMessage(jid, { text: "⚠️ Gagal mendapatkan balasan format teks dari server data." });
+                } 
+                // JIKA Google langsung mengirim teks biasa tanpa dibungkus format JSON
+                else if (res && typeof res.data === 'string') {
+                    return await sock.sendMessage(jid, { text: res.data });
+                }
+                // JIKA Google mengirim objek JSON langsung berupa text/message
+                else if (res && res.data && (res.data.text || res.data.message)) {
+                    return await sock.sendMessage(jid, { text: res.data.text || res.data.message });
+                }
+                // Jika tipenya tidak dikenal
+                else {
+                    return await sock.sendMessage(jid, { text: `⚠️ Format data Google tidak dikenali. Cek log terminal VPS.` });
                 }
             } catch (error) {
                 console.error("❌ Error pada fitur /cek:", error.message);
