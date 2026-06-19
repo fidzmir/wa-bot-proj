@@ -148,6 +148,32 @@ async function startSystem() {
             return await sock.sendMessage(jid, { text: menu });
         }
 
+       
+        // ==================== [ TAMBAHAN: HANDLER /CEK ] ====================
+        if (text.toLowerCase().startsWith("/cek")) {
+            try {
+                // Kirim tanda bot sedang mengetik agar user tahu bot bekerja
+                await sock.sendPresenceUpdate('composing', jid);
+                
+                const res = await axios.post(ORIGINAL_BOT_URL, { 
+                    command: text, 
+                    sender: jid 
+                }, { timeout: 15000 }); // Batas aman nunggu Google Apps Script 15 detik
+                
+                if (res && res.data && res.data.type === 'text') {
+                    return await sock.sendMessage(jid, { text: res.data.content });
+                } else {
+                    return await sock.sendMessage(jid, { text: "⚠️ Gagal mendapatkan balasan format teks dari server data." });
+                }
+            } catch (error) {
+                console.error("❌ Error pada fitur /cek:", error.message);
+                return await sock.sendMessage(jid, { 
+                    text: "⚠️ Koneksi ke Google Spreadsheet timeout atau sibuk. Silakan coba sesaat lagi!" 
+                });
+            }
+        }
+        // ====================================================================
+        
         // 3. Handle command /openlist
         if (text.toLowerCase() === "/openlist") {
             return await handleOpenList(sock, jid);
