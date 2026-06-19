@@ -251,7 +251,18 @@ async function startSystem() {
     });
 }
 
-app.listen(WEBHOOK_PORT, "0.0.0.0", () => {
-    console.log(`🚀 Server on port ${WEBHOOK_PORT}`);
-    startSystem();
-});
+// ====================================================================
+// UBAH BAGIAN PALING BAWAH SERVER.JS MENJADI SEPERTI INI:
+// ====================================================================
+
+// Jalankan sistem utama WhatsApp terlebih dahulu
+startSystem()
+    .then(() => {
+        // Setelah sistem WA siap, baru buka Port Webhook 8080
+        app.listen(WEBHOOK_PORT, "0.0.0.0", () => {
+            console.log(`🚀 Server Webhook aktif di port ${WEBHOOK_PORT}`);
+        });
+    })
+    .catch((err) => {
+        console.error("❌ Gagal menyalakan sistem utama:", err.message);
+    });
