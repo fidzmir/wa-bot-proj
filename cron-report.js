@@ -9,7 +9,7 @@ const SPREADSHEET_ID_B = "1RPtjLazoV7lpxACc97x4BzITqTzCH81e1qqPdE5Mq-8";
 const SPREADSHEET_ID_C = "1om0vnc5JgPMefn6Drz74ugL7C8Q-ntX2qXRVxNLf-4c"; 
 
 const GROUP_RCVC = "628817433101-1550727854@g.us"; 
-const LOCAL_API_URL = "http://localhost:8080/api/send-report"; // Endpoint Express di server.js Anda
+const LOCAL_API_URL = "http://localhost:8080/"; // ✅ Benar (Sesuai dengan app.post("/", ...) di server.js) // Endpoint Express di server.js Anda
 
 // Mapping konfigurasi mesin aktif (T1 & T2 diset off: true)
 const CONFIG_MACHINES = [
