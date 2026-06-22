@@ -190,14 +190,14 @@ async function generateAndSendReport() {
     let totalDTAllDesimal = (totalDTHariIni / 60).toFixed(2).replace('.', ',');
     const hariTanggalTeks = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-    const messageText = `" Laporan Hasil Treating - A1\n` +
-                        `Hari & Tanggal  =  ${hariTanggalTeks}\n` +
-                        `Shift                  =  ${targetShift}\n` +
-                        `Tim                     =  ${timFound}\n` +
-                        `Jam Kerja          =  7\n` +
-                        `Total DT            =  ${totalDTAllDesimal}\n\n` +
-                        sectionPesanMachines +
-                        `"`;
+const messageText = `Laporan Hasil Treating - A1
+Hari & Tanggal  =  ${hariTanggalTeks}
+Shift                  =  ${targetShift}
+Tim                     =  ${timFound}
+Jam Kerja          =  7
+Total DT            =  ${totalDTAllDesimal}
+
+${sectionPesanMachines}`;
 
     try {
         const res = await axios.post(LOCAL_API_URL, { 
