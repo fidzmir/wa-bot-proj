@@ -45,10 +45,31 @@ app.get("/", (req, res) => {
 app.post("/", async (req, res) => {
     if (!req.body || !sock) return res.status(400).send("ERROR");
     res.status(200).send("RECEIVED");
+    
     try {
-        const { message, targetJid } = req.body;
-        await sock.sendMessage(targetJid || DEPT_NOTICE_NUMBER, { text: message });
-    } catch (e) { console.error("Webhook Error:", e.message); }
+        const { message, targetJid, pdfUrl, fileName } = req.body;
+        const finalTarget = targetJid || DEPT_NOTICE_NUMBER;
+
+        // 1. Kirim Pesan Teks Utama Terlebih Dahulu
+        if (message) {
+            await sock.sendMessage(finalTarget, { text: message });
+        }
+        
+        // 2. JIKA Google Script Mengirimkan Tautan PDF, Unduh dan Kirim sebagai Berkas Dokumen Asli
+        if (pdfUrl && pdfUrl !== "") {
+            console.log(`⏳ Sedang mengunduh berkas fisik PDF dari cloud Google...`);
+            
+            await sock.sendMessage(finalTarget, {
+                document: { url: pdfUrl }, // Baileys otomatis mendownload binary file dari link direct download
+                mimetype: "application/pdf",
+                fileName: fileName || "Laporan_Hasil_Treating.pdf" // Nama file saat tiba di ruang chat WhatsApp
+            });
+            
+            console.log(`✅ Sukses melampirkan berkas dokumen PDF asli ke: ${finalTarget}`);
+        }
+    } catch (e) { 
+        console.error("❌ Gagal memproses Webhook Pengiriman Dokumen:", e.message); 
+    }
 });
 
 const formatToWhatsApp = (text) => {
