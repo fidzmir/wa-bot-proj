@@ -42,33 +42,87 @@ app.get("/", (req, res) => {
     res.send(`✅ Bot Aktif! WA: ${sock ? "Connected" : "Connecting..."}`);
 });
 
+// ⚠️ Pastikan baris ini sudah ditaruh di bagian paling atas file server.js Anda
+const nodeHtmlToImage = require('node-html-to-image');
+
 app.post("/", async (req, res) => {
     if (!req.body || !sock) return res.status(400).send("ERROR");
     res.status(200).send("RECEIVED");
     
     try {
-        const { message, targetJid, pdfUrl, fileName } = req.body;
-        const finalTarget = targetJid || DEPT_NOTICE_NUMBER;
+        const { message, targetJid, dataMesin, headerData } = req.body;
+        // Tetap menggunakan nomor default Anda jika targetJid kosong
+        const finalTarget = targetJid || DEPT_NOTICE_NUMBER; 
 
-        // 1. Kirim Pesan Teks Utama Terlebih Dahulu
+        // 1. Kirim pesan teks detail laporan terlebih dahulu
         if (message) {
             await sock.sendMessage(finalTarget, { text: message });
         }
         
-        // 2. JIKA Google Script Mengirimkan Tautan PDF, Unduh dan Kirim sebagai Berkas Dokumen Asli
-        if (pdfUrl && pdfUrl !== "") {
-            console.log(`⏳ Sedang mengunduh berkas fisik PDF dari cloud Google...`);
-            
-            await sock.sendMessage(finalTarget, {
-                document: { url: pdfUrl }, // Baileys otomatis mendownload binary file dari link direct download
-                mimetype: "application/pdf",
-                fileName: fileName || "Laporan_Hasil_Treating.pdf" // Nama file saat tiba di ruang chat WhatsApp
+        // 2. JIKA ada paket data JSON, buat gambar tabel otomatis yang rapi & kebal teks panjang
+        if (dataMesin && Array.isArray(dataMesin) && dataMesin.length > 0) {
+            console.log("⏳ Menghidupkan mesin render HTML-to-Image di VPS...");
+
+            // Susun baris tabel HTML dari kiriman JSON secara dinamis
+            let tableRowsHtml = "";
+            dataMesin.forEach(m => {
+                tableRowsHtml += `
+                    <tr>
+                        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #1e293b;">${m.section}</td>
+                        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 500;">${m.hasil}</td>
+                        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: right; color: ${m.reject !== '0' ? '#ef4444' : '#64748b'}; font-weight: 500;">${m.reject}</td>
+                        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: center; font-weight: bold; color: ${m.dt !== '0' ? '#b91c1c' : '#0f172a'};">${m.dt}</td>
+                        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; font-size: 11.5px; color: #334155; line-height: 1.4; max-width: 250px; word-wrap: break-word;">${m.kendala}</td>
+                    </tr>
+                `;
             });
-            
-            console.log(`✅ Sukses melampirkan berkas dokumen PDF asli ke: ${finalTarget}`);
+
+            // Menggambar kode HTML menjadi file foto PNG jernih di dalam memori internal VPS
+            const imageBuffer = await nodeHtmlToImage({
+                html: `
+                <html>
+                    <body style="font-family: 'Segoe UI', Helvetica, Arial, sans-serif; padding: 15px; width: 750px; background-color: #f1f5f9;">
+                        <div style="background: white; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid #e2e8f0;">
+                            
+                            <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 18px; text-align: center; color: white;">
+                                <div style="font-weight: bold; font-size: 18px; letter-spacing: 0.5px; margin-bottom: 4px;">LAPORAN HASIL TREATING - A1</div>
+                                <div style="font-size: 12px; color: #94a3b8;">Tanggal: ${headerData?.tanggal || '-'} | Shift: ${headerData?.shift || '-'} | Tim: ${headerData?.tim || '-'}</div>
+                            </div>
+
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
+                                <thead>
+                                    <tr style="background-color: #334155; color: white; text-align: left;">
+                                        <th style="padding: 12px 10px;">SECTION</th>
+                                        <th style="padding: 12px 10px; text-align: right;">HASIL (Shts)</th>
+                                        <th style="padding: 12px 10px; text-align: right;">REJECT (Shts)</th>
+                                        <th style="padding: 12px 10px; text-align: center;">DT (Mnt)</th>
+                                        <th style="padding: 12px 10px; width: 250px;">KENDALA / CATATAN</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${tableRowsHtml}
+                                </tbody>
+                            </table>
+                            
+                            <div style="background-color: #f8fafc; padding: 10px 15px; font-size: 11px; color: #64748b; text-align: right; border-top: 1px solid #e2e8f0;">
+                                Total Downtime Shift: <span style="font-weight: bold; color: #b91c1c;">${headerData?.totalDt || '0'} Menit</span>
+                            </div>
+                        </div>
+                    </body>
+                </html>
+                `
+            });
+
+            // Tembak gambar visual tabel langsung ke WhatsApp grup Anda
+            await sock.sendMessage(finalTarget, {
+                image: imageBuffer,
+                caption: "📋 *Visual Report Card Dashboard - Treating A1*"
+            });
+
+            console.log(`✅ Sukses mengirimkan teks dan gambar tabel laporan ke: ${finalTarget}`);
         }
     } catch (e) { 
-        console.error("❌ Gagal memproses Webhook Pengiriman Dokumen:", e.message); 
+        console.error("❌ Gagal merakit gambar laporan:", e.message); 
     }
 });
 
