@@ -43,7 +43,8 @@ app.post("/", async (req, res) => {
     res.status(200).send("RECEIVED");
     
     try {
-        const { message, targetJid, imageUrl } = req.body;
+        // ⚡ SEKARANG MEMBACA fileUrl DAN isPdf DARI CRAFTMYPDF
+        const { message, targetJid, fileUrl, isPdf } = req.body;
         const finalTarget = targetJid || DEPT_NOTICE_NUMBER;
 
         // 1. Kirim pesan teks detail laporan (Selalu masuk duluan)
@@ -51,24 +52,34 @@ app.post("/", async (req, res) => {
             await sock.sendMessage(finalTarget, { text: message });
         }
         
-        // 2. Kirim Gambar Grafik (Metode Download Buffer - Jauh lebih aman!)
-        if (imageUrl) {
-            console.log(`⏳ Sedang mengunduh grafik dari QuickChart ke memori VPS...`);
+        // 2. Download file hasil render CraftMyPDF ke memori VPS, lalu tembak ke WA
+        if (fileUrl && fileUrl !== "") {
+            console.log(`⏳ Mengunduh berkas jadi dari server CraftMyPDF...`);
             
-            // Node.js mendownload gambar secara internal dari link QuickChart
-            const response = await fetch(imageUrl);
+            // Proses download internal (Metode paling aman & anti-blokir)
+            const response = await fetch(fileUrl);
             const arrayBuffer = await response.arrayBuffer();
-            const imageBuffer = Buffer.from(arrayBuffer); // Ubah jadi file mentah murni
+            const fileBuffer = Buffer.from(arrayBuffer); 
             
-            await sock.sendMessage(finalTarget, {
-                image: imageBuffer, // Kirim file mentah, bukan link lagi
-                caption: "📊 *Grafik Visual Analisa Efisiensi Mesin Shift Ini*"
-            });
-            
-            console.log(`✅ Sukses mengirimkan grafik chart ke: ${finalTarget}`);
+            if (isPdf) {
+                // Jika luaran template CraftMyPDF Anda berupa Dokumen PDF
+                await sock.sendMessage(finalTarget, {
+                    document: fileBuffer,
+                    mimetype: "application/pdf",
+                    fileName: `Laporan_Shift_Produksi_${Date.now()}.pdf`
+                });
+                console.log(`✅ Berkas PDF asli sukses terkirim ke: ${finalTarget}`);
+            } else {
+                // Jika luaran template CraftMyPDF Anda berupa Gambar (.PNG)
+                await sock.sendMessage(finalTarget, {
+                    image: fileBuffer,
+                    caption: "📋 *Visual Laporan Kerja Dashboard - Treating A1*"
+                });
+                console.log(`✅ Gambar infografis sukses terkirim ke: ${finalTarget}`);
+            }
         }
     } catch (e) { 
-        console.error("❌ Gagal memproses atau mengirim grafik WA:", e.message); 
+        console.error("❌ Gagal memproses atau mengirim berkas WA:", e.message); 
     }
 });
 
