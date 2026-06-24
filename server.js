@@ -73,7 +73,7 @@ app.post("/", async (req, res) => {
                 // Jika luaran template CraftMyPDF Anda berupa Gambar (.PNG)
                 await sock.sendMessage(finalTarget, {
                     image: fileBuffer,
-                    caption: "📋 *Visual Laporan Kerja Dashboard - Treating A1*"
+                    caption: "📋 *Report Card Shift - Treating A1*"
                 });
                 console.log(`✅ Gambar infografis sukses terkirim ke: ${finalTarget}`);
             }
