@@ -1,0 +1,210 @@
+/**
+ * KONFIGURASI GLOBAL (VERSI FINAL H-1)
+ */
+const CONFIG = {
+  // --- DAFTAR ID SPREADSHEET SUMBER ---
+  SOURCE_A_ID:  "1RPtjLazoV7lpxACc97x4BzITqTzCH81e1qqPdE5Mq-8", // T3, T4
+  SOURCE_B_ID:  "1om0vnc5JgPMefn6Drz74ugL7C8Q-ntX2qXRVxNLf-4c", // T5, T6
+  SOURCE_T7_ID: "1HcWfYDVI7s_PpFvh22E3YAQomwKc88d3xvVGGf2r2kc", // T7
+  SOURCE_T8_ID: "1qajqvZ2rBBSUQ5cBRgswNgp5W_HetUX-74vd3dObSdI", // T8
+  SOURCE_T9_ID: "1qajqvZ2rBBSUQ5cBRgswNgp5W_HetUX-74vd3dObSdI", // T9
+
+  // --- DAFTAR NAMA SHEET (DI SPREADSHEET UTAMA) ---
+  ALL_SHEETS: ["T3", "T4", "T5", "T6", "T7", "T8", "T9"],
+
+  // --- TARGET PENGIRIMAN RPRO NAV ---
+  RPRO_SS_ID:     "1Wy5Bi6mk4tJl2J4gNWnU7I1tHrOhcAWr7ukzM41vNNI",
+  RPRO_SHEET_34:  "REQUEST T2,3,4",
+  RPRO_SHEET_56:  "REQUEST T1,T5,T6",
+  RPRO_SHEET_789: "REQUEST T7,8,9 AS", // Nama Sesuai Konfirmasi (Tanpa koma sebelum AS)
+
+  // --- WHATSAPP SETTINGS ---
+  WEBHOOK_URL: "http://35.226.129.149:8080/", 
+  TARGET_JID:  "6285933263178@s.whatsapp.net"
+};
+
+/**
+ * 1. FUNGSI UTAMA (TRIGGER)
+ */
+function mainJobPagi() {
+  Logger.log("Memulai proses otomatisasi H-1...");
+  importAllData(); 
+  Utilities.sleep(2000);
+  SpreadsheetApp.flush();
+  sendDailyReport(); 
+}
+
+/**
+ * 2. FUNGSI IMPORT DATA (FILTER H-1)
+ */
+function importAllData() {
+  var hariIni = new Date();
+  var kemarin = new Date();
+  kemarin.setDate(hariIni.getDate() - 1);
+  
+  // Format pembanding untuk tipe String
+  var tglStr1 = Utilities.formatDate(kemarin, "GMT+7", "d/M/yyyy"); 
+  var tglStr2 = Utilities.formatDate(kemarin, "GMT+7", "dd/MM/yyyy");
+
+  var destSS = SpreadsheetApp.getActiveSpreadsheet();
+
+  function execImport(sourceId, srcName, destName) {
+    try {
+      var srcSheet = SpreadsheetApp.openById(sourceId).getSheetByName(srcName);
+      var destSheet = destSS.getSheetByName(destName);
+
+      if (!srcSheet || !destSheet) {
+        Logger.log("Skip: " + srcName + " (Sheet tidak ditemukan)");
+        return;
+      }
+
+      var data = srcSheet.getDataRange().getValues();
+      if (data.length < 2) return;
+
+      var filtered = [data[0], data[1]]; // Header & Judul Kolom
+      
+      for (var i = 2; i < data.length; i++) {
+        var rowDate = data[i][0]; // Kolom A
+        
+        if (rowDate instanceof Date) {
+          if (rowDate.getDate() === kemarin.getDate() && 
+              rowDate.getMonth() === kemarin.getMonth() && 
+              rowDate.getFullYear() === kemarin.getFullYear()) {
+            filtered.push(data[i]);
+          }
+        } else if (typeof rowDate === "string" && rowDate.includes("/")) {
+          if (rowDate === tglStr1 || rowDate === tglStr2) {
+            filtered.push(data[i]);
+          }
+        }
+      }
+
+      if (destSheet.getFilter()) destSheet.getFilter().remove();
+      destSheet.clear().getRange(1, 1, filtered.length, filtered[0].length).setValues(filtered);
+      destSheet.setFrozenRows(2);
+      if (filtered.length > 1) {
+        destSheet.getRange(2, 1, filtered.length - 1, filtered[0].length).createFilter();
+      }
+    } catch (e) { 
+      Logger.log("Error Import " + destName + ": " + e.message); 
+    }
+  }
+
+  // --- EKSEKUSI PENARIKAN ---
+  execImport(CONFIG.SOURCE_A_ID,  "T3",     "T3");
+  execImport(CONFIG.SOURCE_A_ID,  "T4",     "T4");
+  execImport(CONFIG.SOURCE_B_ID,  "T5",     "T5");
+  execImport(CONFIG.SOURCE_B_ID,  "T6",     "T6");
+  execImport(CONFIG.SOURCE_T7_ID, "T7 NEW", "T7"); // Mapping: T7 NEW ke T7
+  execImport(CONFIG.SOURCE_T8_ID, "T8",     "T8");
+  execImport(CONFIG.SOURCE_T9_ID, "T9",     "T9");
+
+  destSS.toast("Data H-1 Berhasil Diperbarui!", "Sukses ✅");
+}
+
+/**
+ * 3. FUNGSI LAPORAN HARIAN (WA & RPRO)
+ */
+function sendDailyReport() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  var dateStr = Utilities.formatDate(yesterday, "GMT+7", "dd/MM/yyyy");
+  
+  var reportMsg = "Halo Treating, Berikut Report Card Produksi Harian Kita Tanggal " + dateStr + "\n\n";
+  var rpro34 = [], rpro56 = [], rpro789 = [];
+
+  CONFIG.ALL_SHEETS.forEach(function(shName) {
+    var sheet = ss.getSheetByName(shName);
+    if (!sheet) return;
+
+    var data = sheet.getDataRange().getValues();
+    var summary = {}; 
+
+    // Tentukan Indeks Kolom Jumlah
+    var col = 47; // Default T3, T4 (AV)
+    if (shName === "T5" || shName === "T6") col = 53; // BB
+    else if (shName === "T7") col = 45; // AT
+    else if (shName === "T8" || shName === "T9") col = 57; // BF
+
+    for (var i = 2; i < data.length; i++) {
+      var item = data[i][6]; // Kolom G
+      var val = parseFloat(data[i][col]) || 0; 
+      var nCol = (shName === "T8" || shName === "T9") ? data[i][13] : ""; // Kolom N
+
+      if (item && val > 0) {
+        if (!summary[item]) summary[item] = { total: 0, extra: "" };
+        summary[item].total += val;
+        if (nCol) summary[item].extra = nCol;
+      }
+    }
+
+    reportMsg += "*Treating " + shName.replace("T", "") + "*\n";
+    var hasData = false;
+    for (var key in summary) {
+      reportMsg += "* " + key + " : " + summary[key].total.toLocaleString("id-ID") + "\n";
+      hasData = true;
+      var entry = { item: key, machine: shName, total: summary[key].total, extra: summary[key].extra };
+      if (shName === "T3" || shName === "T4") rpro34.push(entry);
+      else if (shName === "T5" || shName === "T6") rpro56.push(entry);
+      else rpro789.push(entry);
+    }
+    if (!hasData) reportMsg += "_Tidak ada data produksi_\n";
+    reportMsg += "\n";
+  });
+
+  // Kirim ke Spreadsheet RPRO NAV
+  if (rpro34.length > 0)  requestRPROAutomasi(rpro34,  CONFIG.RPRO_SHEET_34);
+  if (rpro56.length > 0)  requestRPROAutomasi(rpro56,  CONFIG.RPRO_SHEET_56);
+  if (rpro789.length > 0) requestRPROAutomasi(rpro789, CONFIG.RPRO_SHEET_789);
+
+  // Kirim ke WhatsApp
+  var payload = { "message": reportMsg.trim(), "targetJid": CONFIG.TARGET_JID };
+  var options = { "method": "post", "contentType": "application/json", "payload": JSON.stringify(payload) };
+  try { UrlFetchApp.fetch(CONFIG.WEBHOOK_URL, options); } catch (e) { Logger.log("WA Error: " + e.message); }
+}
+
+/**
+ * 4. FUNGSI INPUT KE RPRO NAV
+ */
+function requestRPROAutomasi(dataList, targetSheetName) {
+  try {
+    var targetSS = SpreadsheetApp.openById(CONFIG.RPRO_SS_ID);
+    var sheet = targetSS.getSheetByName(targetSheetName);
+    if (!sheet) throw new Error("Sheet " + targetSheetName + " tidak ditemukan!");
+
+    var yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    var dateYYMMDD = Utilities.formatDate(yesterday, "GMT+7", "yyMMdd");
+
+    var vals = sheet.getRange("B1:B" + sheet.getMaxRows()).getValues();
+    var startRow = 0;
+    for (var i = 0; i < vals.length; i++) {
+      if (vals[i][0] === "" || vals[i][0] === null) {
+        startRow = i + 1;
+        break;
+      }
+    }
+    if (startRow === 0) startRow = sheet.getLastRow() + 1;
+
+    dataList.forEach(function(row, index) {
+      var targetRow = startRow + index;
+      sheet.getRange(targetRow, 2, 1, 4).setValues([[row.item, row.machine, dateYYMMDD, row.total]]);
+      if ((row.machine === "T8" || row.machine === "T9") && row.extra !== "") {
+        sheet.getRange(targetRow, 9).setValue(row.extra); // Kolom I
+      }
+    });
+    Logger.log("RPRO Sukses: " + targetSheetName);
+  } catch (e) {
+    Logger.log("RPRO Error (" + targetSheetName + "): " + e.message);
+  }
+}
+
+/**
+ * 5. MENU UI
+ */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('🚀 Update Data')
+    .addItem('Jalankan Job Pagi Sekarang', 'mainJobPagi')
+    .addToUi();
+}
