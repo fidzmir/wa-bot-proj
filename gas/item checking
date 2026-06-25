@@ -1,0 +1,94 @@
+// 1. FUNGSI UTAMA UNTUK MENERIMA POST DARI VPS BOT WHATSAPP
+function doPost(e) {
+  try {
+    // Ambil data JSON yang dikirim oleh VPS
+    const requestData = JSON.parse(e.postData.contents);
+    const commandText = requestData.command || "";
+    
+    let replyMessage = "";
+
+    // Cek apakah perintahnya diawali dengan /cek
+    if (commandText.toLowerCase().startsWith("/cek")) {
+      replyMessage = handleCekCommand(commandText);
+    } else {
+      replyMessage = "⚠️ Perintah tidak dikenali oleh Google Apps Script.";
+    }
+
+    // WAJIB MENGEMBALIKAN FORMAT JSON YANG DICARI SERVER.JS: { type: 'text', content: '...' }
+    return ContentService.createTextOutput(JSON.stringify({
+      type: "text",
+      content: replyMessage
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    // Jika ada error internal kodingan script
+    return ContentService.createTextOutput(JSON.stringify({
+      type: "text",
+      content: "❌ Google Apps Script Error: " + error.message
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// 2. FUNGSI LOGIKA PENCARIAN DATA SPREADSHEET (Milikmu yang sudah benar)
+function handleCekCommand(message) {
+  const parts = message.split(" ");
+  if (parts.length < 2) return "⚠️ Gunakan /cek [ID]\n_Contoh: /cek T426052911N_";
+  
+  const val = parts[1].trim().toUpperCase();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  let sheetName = val.substring(0, 2);
+  
+  const sheet = findSheet(ss, sheetName);
+  if (!sheet) return `❌ Mesin/Sheet *${sheetName}* tidak ditemukan di Spreadsheet.`;
+  
+  const data = sheet.getDataRange().getValues();
+  
+  for (let i = 0; i < data.length; i++) {
+    // ==================== [ KONDISI KHUSUS MESIN T3 ] ====================
+    // ==================== [ FIX KONDISI KHUSUS MESIN T3 ] ====================
+    if (sheetName === "T3") {
+      // Kita cek kecocokan ID yang diketik user dengan yang ada di Kolom C (indeks 2)
+      let idKolomC = data[i][2] ? data[i][2].toString().trim().toUpperCase() : "";
+      
+      if (idKolomC === val) {
+        const r = data[i];
+        return `📄 ID DITEMUKAN: ${val} (Sheet: ${sheetName})\n\n` +
+               `📦 Item: ${r[6] || "-"}\n` +   // Kolom G (indeks 6) sebagai ITEM
+               `🏷️ Lot: ${r[7] || "-"}\n` +    // Kolom H (indeks 7) sebagai LOT
+               `📑 Qty: ${r[12] || 0}`;        // Kolom M (indeks 12) sebagai Qty
+      }
+    
+    } 
+    // ==================== [ KONDISI MESIN LAIN (T4, T5-T8) ] ====================
+    else {
+      let idKolomB = data[i][1] ? data[i][1].toString().trim().toUpperCase() : "";
+      let idKolomC = data[i][2] ? data[i][2].toString().trim().toUpperCase() : "";
+      
+      if (idKolomB === val || idKolomC === val) {
+        const r = data[i];
+        return `📄 ID DITEMUKAN: ${val} (Sheet: ${sheetName})\n\n` +
+               `📦 Item: ${r[3] || "-"}\n` +   
+               `🏷️ Lot: ${r[4] || "-"}\n` +    
+               `📑 Qty: ${r[9] || 0}`;         
+      }
+    }
+  }
+  
+  if (sheetName === "T3") {
+    return `❌ Data ID *${val}* tidak ditemukan di sheet *${sheetName}*, baik di Kolom G maupun Kolom H.`;
+  } else {
+    return `❌ Data ID *${val}* tidak ditemukan di sheet *${sheetName}*, baik di Kolom B maupun Kolom C.`;
+  }
+}
+
+// 3. FUNGSI PEMBANTU UNTUK MENCARI SHEET TANPA SENSITIF HURUF BESAR/KECIL
+function findSheet(ss, name) {
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    if (sheets[i].getName().toUpperCase() === name.toUpperCase()) {
+      return sheets[i];
+    }
+  }
+  return null;
+}
