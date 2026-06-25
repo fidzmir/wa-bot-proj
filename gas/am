@@ -1,0 +1,166 @@
+const FOLDER_ID = "14bgHpRStvw_uKDPwUe6V7ajy1Klwh-yZ";
+
+function saveFileAndGetDirectUrl(imageBuffer, fileName) {
+    const folder = DriveApp.getFolderById(FOLDER_ID);
+    const decoded = Utilities.base64Decode(imageBuffer.replace(/^data:image\/\w+;base64,/, "").replace(/\s/g, ""));
+    const blob = Utilities.newBlob(decoded, "image/jpeg", fileName);
+    const file = folder.createFile(blob);
+
+    // Kalau gambarnya udah ada di Drive tapi bot error, 
+    // kemungkinan proses 'setSharing' ini yang bikin lemot/timeout.
+    // Kita coba buat lebih simpel:
+    try {
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch(e) {
+        console.warn("Gagal set sharing, tapi file aman");
+    }
+
+    return "https://drive.google.com/uc?export=download&id=" + file.getId();
+}
+
+function doGet(e) {
+    const action = e.parameter.action;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheets = ss.getSheets();
+
+    if (action === "getList") {
+        let results = [];
+        sheets.forEach(sheet => {
+            const data = sheet.getDataRange().getValues();
+            for (let i = 1; i < data.length; i++) {
+                if (data[i][10] === "OPEN") {
+                    results.push({
+                        tanggal: data[i][0] instanceof Date ? Utilities.formatDate(data[i][0], "GMT+7", "dd/MM/yyyy") : "-",
+                        machine: data[i][2],
+                        tag: data[i][1],
+                        desc: data[i][7]
+                    });
+                }
+            }
+        });
+        return ContentService.createTextOutput(JSON.stringify(results)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === "getDetail") {
+        const tagToFind = e.parameter.tag;
+        let detail = null;
+
+        for (let s = 0; s < sheets.length; s++) {
+            const data = sheets[s].getDataRange().getValues();
+            for (let i = 1; i < data.length; i++) {
+                if (data[i][1] == tagToFind) {
+                    detail = {
+                        tag: data[i][1],
+                        tanggal: data[i][0] instanceof Date ? Utilities.formatDate(data[i][0], "GMT+7", "dd/MM/yyyy") : "-",
+                        machine: data[i][2],
+                        pelapor: data[i][3],       // Index 3: Sender Name
+                        abnormality: data[i][4],   // Index 4: Abnormality
+                        contamination: data[i][5], // Index 5: Contamination
+                        access: data[i][6],        // Index 6: Hard to Access
+                        desc: data[i][7],
+                        status: data[i][10],       // Index 10: Status (OPEN/CLOSE)
+                        photoUrl: data[i][11]
+                    };
+                    break;
+                }
+            }
+            if (detail) break;
+        }
+        return ContentService.createTextOutput(JSON.stringify(detail)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === "getRawData") {
+        const sheetName = e.parameter.sheetName;
+        const sheet = ss.getSheetByName(sheetName);
+        if (!sheet) return ContentService.createTextOutput(JSON.stringify({error: "Sheet tidak ditemukan"})).setMimeType(ContentService.MimeType.JSON);
+        
+        // getDisplayValues ensures dates and numbers are formatted nicely as strings
+        const data = sheet.getDataRange().getDisplayValues(); 
+        
+        // Convert to array of objects
+        const headers = data[0];
+        const rows = [];
+        for (let i = 1; i < data.length; i++) {
+            let rowObj = {};
+            for (let j = 0; j < headers.length; j++) {
+                if(data[i][j]) { // Only include non-empty cells to save space
+                    rowObj[headers[j]] = data[i][j];
+                }
+            }
+            rows.push(rowObj);
+        }
+        
+        return ContentService.createTextOutput(JSON.stringify(rows)).setMimeType(ContentService.MimeType.JSON);
+    }
+}
+
+function doPost(e) {
+    try {
+        const data = JSON.parse(e.postData.contents);
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+        // --- FITUR CLOSE TAG ---
+        if (data.action === "closeTag") {
+            const sheets = ss.getSheets();
+            let found = false;
+            let closeFileUrl = "";
+
+            if (data.imageBuffer) {
+                const fileName = "CLOSE_" + data.tagCode + "_" + new Date().getTime() + ".jpg";
+                closeFileUrl = saveFileAndGetDirectUrl(data.imageBuffer, fileName);
+            }
+
+            for (let s = 0; s < sheets.length; s++) {
+                let sheet = sheets[s];
+                let values = sheet.getDataRange().getValues();
+                for (let i = 1; i < values.length; i++) {
+                    if (values[i][1] == data.tagCode) {
+                        sheet.getRange(i + 1, 11).setValue("CLOSE");
+                        sheet.getRange(i + 1, 13).setValue(closeFileUrl);
+                        found = true; break;
+                    }
+                }
+                if (found) break;
+            }
+            return ContentService.createTextOutput(found ? "SUCCESS" : "NOT_FOUND").setMimeType(ContentService.MimeType.TEXT);
+        }
+
+        // --- INPUT RED TAG BARU ---
+        const sheetName = data.targetSheet;
+        const sheet = ss.getSheetByName(sheetName);
+        if (!sheet) return ContentService.createTextOutput("Error: Sheet tidak ditemukan").setMimeType(ContentService.MimeType.TEXT);
+
+        const tagCode = generateManualTag(sheetName, data.deptTag);
+        let fileUrl = "";
+        if (data.imageBuffer) {
+            const fileName = "TPM_" + tagCode + "_" + new Date().getTime() + ".jpg";
+            fileUrl = saveFileAndGetDirectUrl(data.imageBuffer, fileName);
+        }
+
+        sheet.appendRow([
+            new Date(), tagCode, data.machine, data.senderName,
+            data.abnormality, data.contamination, data.access, data.description,
+            new Date(), 0, "OPEN", fileUrl
+        ]);
+
+        return ContentService.createTextOutput("OK").setMimeType(ContentService.MimeType.TEXT);
+    } catch (err) {
+        return ContentService.createTextOutput("Error: " + err.toString());
+    }
+}
+
+function generateManualTag(sheetName, dept) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(sheetName);
+    const data = sheet.getDataRange().getValues();
+    let lastNum = 0;
+    for (let i = data.length - 1; i >= 1; i--) {
+        const tag = data[i][1] ? data[i][1].toString() : "";
+        if (tag.includes(dept)) {
+            const parts = tag.split("-");
+            const num = parseInt(parts[parts.length - 1]);
+            if (!isNaN(num)) { lastNum = num; break; }
+        }
+    }
+    return `AM-${dept}-${(lastNum + 1).toString().padStart(4, '0')}`;
+}
