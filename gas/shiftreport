@@ -1,0 +1,327 @@
+/**
+ * =========================================================================
+ * KONFIGURASI GLOBAL LAPORAN SHIFT (CRAFTMYPDF - PURE LURUS & FIXED)
+ * =========================================================================
+ */
+const CONFIG_SHIFT = {
+  SPREADSHEET_ID_B: "1RPtjLazoV7lpxACc97x4BzITqTzCH81e1qqPdE5Mq-8", 
+  SPREADSHEET_ID_C: "1om0vnc5JgPMefn6Drz74ugL7C8Q-ntX2qXRVxNLf-4c", 
+
+  // --- KREDENSIAL TEMPLATE INVOICE ANDA ---
+  CRAFT_API_KEY:     "7e28MzE3NDg6MzE5NzU6N1pNTmF5RzZsUmRwMXFsYQ=",
+  CRAFT_TEMPLATE_ID: "60d0MzE3NTY6MzE5ODM6YVhrbWpmZDRLcHphRGlXbg=",
+  CRAFT_ACCOUNTS: [
+    { name: "Primary", apiKey: "7e28MzE3NDg6MzE5NzU6N1pNTmF5RzZsUmRwMXFsYQ=", templateId: "b6577b23c792b226" },
+    { name: "Secondary", apiKey: "60d0MzE3NTY6MzE5ODM6YVhrbWpmZDRLcHphRGlXbg=", templateId: "b6577b23c792b226" }
+  ],
+
+  // --- WHATSAPP GATEWAY SETTINGS (VPS NODE.JS) ---
+  WEBHOOK_URL: "http://35.226.129.149:8080/", 
+  GROUP_RCVC:  "628817433101-1550727854@g.us" 
+};
+
+// Mapping konfigurasi mesin aktif
+const MACHINES = [
+  { name: "T1", off: true },
+  { name: "T2", off: true },
+  { name: "T3", off: false, sheetName: "T3", spreadsheetId: CONFIG_SHIFT.SPREADSHEET_ID_B, idxHasil: 47, idxReject: 50, idxWip: 6 },
+  { name: "T4", off: false, sheetName: "T4", spreadsheetId: CONFIG_SHIFT.SPREADSHEET_ID_B, idxHasil: 47, idxReject: 50, idxWip: 6 },
+  { name: "T5", off: false, sheetName: "T5", spreadsheetId: CONFIG_SHIFT.SPREADSHEET_ID_C, idxHasil: 53, idxReject: 71, idxWip: 6 },
+  { name: "T6", off: false, sheetName: "T6", spreadsheetId: CONFIG_SHIFT.SPREADSHEET_ID_C, idxHasil: 53, idxReject: 71, idxWip: 6 }
+];
+
+function jalankanLaporanShift() {
+  Logger.log("Memulai Ekstraksi Data Shift - Versi Perbaikan Total...");
+  
+  var now = new Date();
+  var currentHour = now.getHours();
+  
+  var todayStr = Utilities.formatDate(now, "GMT+7", "yyyy-MM-dd");
+  var hariTanggalTeks = Utilities.formatDate(now, "GMT+7", "EEEE, dd MMMM yyyy");
+
+  // --- PERBAIKAN LOGIKA SHIFT DENGAN TOLERANSI DELAY INPUT 30 MENIT ---
+  var currentMinute = now.getMinutes();
+  var targetShift = "1"; // Default awal
+
+  // 1. Penentuan Shift 2 (Normal jam 06:00 - 13:59)
+  // Toleransi: Jika jam 06:00 sampai 06:30, script dianggap masih menarik data SHIFT 1
+  if ((currentHour == 6 && currentMinute >= 30) || (currentHour > 6 && currentHour < 14)) {
+    targetShift = "2";
+  } 
+  // 2. Penentuan Shift 3 (Normal jam 14:00 - 21:59)
+  // Toleransi: Jika jam 14:00 sampai 14:30, script dianggap masih menarik data SHIFT 2
+  else if ((currentHour == 14 && currentMinute >= 30) || (currentHour > 14 && currentHour < 22)) {
+    targetShift = "3";
+  } 
+  // 3. Penentuan Shift 1 (Normal jam 22:00 - 05:59)
+  // Toleransi: Jika jam 22:00 sampai 22:30, script dianggap masih menarik data SHIFT 3
+  else if ((currentHour == 22 && currentMinute >= 30) || currentHour > 22 || currentHour < 6) {
+    targetShift = "1";
+  }
+
+  var totalDTHariIni = 0;
+  var timFound = "-";
+  var temporaryMatrix = [];
+  var wipBreakdownData = {}; // Object to aggregate WIP variant and its production
+  var spreadsheetCache = {};
+
+  for (var m = 0; m < MACHINES.length; m++) {
+    var mac = MACHINES[m];
+    var namaMesinLengkap = "Treating " + (m + 1);
+    
+    if (mac.off) {
+      temporaryMatrix.push([namaMesinLengkap, "PLAN STOP", 0, 0, 0]);
+      continue; 
+    }
+
+    var totalHasil = 0; // Total production
+    var totalReject = 0; // Total rejects
+    var totalMenitDTMachine = 0;
+    var kendalaList = [];
+    var isSheetActiveInShift = false;
+
+    try {
+      if (!spreadsheetCache[mac.spreadsheetId]) {
+        spreadsheetCache[mac.spreadsheetId] = SpreadsheetApp.openById(mac.spreadsheetId);
+      }
+      var srcSS = spreadsheetCache[mac.spreadsheetId];
+      var srcSheet = srcSS.getSheetByName(mac.sheetName);
+      
+      var lastRow = srcSheet.getLastRow();
+      var startRow = Math.max(1, lastRow - 1500);
+      var totalRowsToRead = lastRow - startRow + 1;
+      var rows = srcSheet.getRange(startRow, 1, totalRowsToRead, srcSheet.getLastColumn()).getValues();
+
+      // MEMPERBAIKI TRACKING STATE DATE & SHIFT YANG SEMPAT RUSAK
+      var shiftFound = "";
+      var lastValidTim = "-";
+      var lastValidDate = "-";
+      var dateCheckStr = Utilities.formatDate(now, "GMT+7", "dd/MM/yyyy");
+
+      for (var i = 0; i < rows.length; i++) {
+        if ((startRow + i) <= 2) continue;
+
+        var row = rows[i];
+        if (!row || row.length === 0) continue;
+
+        if (row[0] && row[0] !== "") {
+          lastValidDate = row[0] instanceof Date ? Utilities.formatDate(row[0], "GMT+7", "dd/MM/yyyy") : row[0].toString().trim();
+          lastValidTim = row[2] ? row[2].toString().trim() : "-";
+          shiftFound = row[3] ? row[3].toString().trim() : "";
+        }
+
+        if (lastValidDate === dateCheckStr && shiftFound === targetShift) {
+          isSheetActiveInShift = true;
+          if (timFound === "-") timFound = lastValidTim;
+
+          var lotIdText = row[1] ? row[1].toString().trim() : "";
+          
+          var rawAlasan = row[8];
+          var alasanDT = "";
+          if (rawAlasan !== null && rawAlasan !== undefined && !(rawAlasan instanceof Date)) {
+             alasanDT = rawAlasan.toString().trim();
+          }
+
+          if (lotIdText !== "") {
+            totalHasil += parseNumericCell(row[mac.idxHasil]);
+            totalReject += parseNumericCell(row[mac.idxReject]);
+
+            // Collect data for the new WIP breakdown table
+            var wipVariant = row[mac.idxWip] ? row[mac.idxWip].toString().trim() : "";
+            if (wipVariant && wipVariant !== "0") {
+              var hasilAmount = parseNumericCell(row[mac.idxHasil]);
+              wipBreakdownData[wipVariant] = (wipBreakdownData[wipVariant] || 0) + hasilAmount;
+            }
+          } 
+          else if (lotIdText === "" && alasanDT !== "" && alasanDT !== "0") {
+            var jamMulaiStr = parseTimeStr(row[9]);
+            var jamAkhirStr = parseTimeStr(row[10]);
+
+            if (jamMulaiStr !== "" && jamAkhirStr !== "") {
+              var sParts = jamMulaiStr.split(':').map(Number);
+              var eParts = jamAkhirStr.split(':').map(Number);
+
+              var totalMenitMulai = (sParts[0] * 60) + sParts[1];
+              var totalMenitAkhir = (eParts[0] * 60) + eParts[1];
+              if (totalMenitAkhir < totalMenitMulai) totalMenitAkhir += 24 * 60;
+
+              var selisih = totalMenitAkhir - totalMenitMulai;
+              if (selisih > 0) {
+                totalMenitDTMachine += selisih;
+                totalDTHariIni += selisih;
+              }
+            }
+
+            var upperAlasan = alasanDT.toUpperCase();
+            if (!upperAlasan.startsWith("RC ") && !upperAlasan.startsWith("SPB ") && isNaN(upperAlasan) && !upperAlasan.includes("1899") && !upperAlasan.includes("GMT")) {
+              kendalaList.push(upperAlasan);
+            }
+          }
+        }
+      }
+    } catch (err) {}
+
+    var teksKendala = "-";
+    if (!isSheetActiveInShift) {
+      teksKendala = "PLAN STOP";
+    } else if (kendalaList.length > 0) {
+      var counts = {};
+      var cleanKendala = kendalaList.filter(function(x) {
+        return x !== "SHIFT" && x !== "TEAM" && x !== "T6" && x !== "T5" && x !== "T4" && x !== "T3";
+      });
+      if (cleanKendala.length > 0) {
+        cleanKendala.forEach(function(x) { counts[x] = (counts[x] || 0) + 1; });
+        teksKendala = Object.keys(counts).map(function(key) {
+          return counts[key] > 1 ? key + " " + counts[key] + "X" : key;
+        }).join(', ');
+      }
+    }
+
+    temporaryMatrix.push([namaMesinLengkap, teksKendala, totalHasil, totalReject, totalMenitDTMachine]);
+  }
+
+  // BENTUKAN PAYLOAD JSON UNTUK CRAFTMYPDF
+  var itemsInvoiceJson = [];
+  var totalHasilGlobal = 0;
+  var totalRejectGlobal = 0;
+  temporaryMatrix.forEach(function(item) {
+     itemsInvoiceJson.push({
+       "mesin": item[0],
+       "kendala": item[1],
+       "quantity": Number(item[2]) || 0,   // Hasil
+       "unit_price": Number(item[3]) || 0, // Reject
+       "total": Number(item[4]) || 0       // Downtime
+     });
+     totalHasilGlobal += Number(item[2]) || 0;
+     totalRejectGlobal += Number(item[3]) || 0;
+  });
+
+  itemsInvoiceJson.reverse(); // Mengunci T1 di urutan paling atas
+
+  // Format the WIP breakdown data for the new table
+  var wipBreakdownTable = Object.keys(wipBreakdownData).map(function(variant) {
+    return { "item_wip": variant, "hasil_sheet": wipBreakdownData[variant] };
+  });
+
+  // Calculate the grand total for the WIP items
+  var totalWipGlobal = wipBreakdownTable.reduce(function(sum, current) {
+    return sum + current.hasil_sheet;
+  }, 0);
+
+  var dataMurniInvoice = {
+    "invoice_number": "SHIFT-" + targetShift + "-" + Utilities.formatDate(now, "GMT+7", "HHmm"),
+    "date": todayStr,
+    "due_date": todayStr,
+    "currency": "MNT",
+    "company_name": "LAPORAN HASIL TREATING - A1",
+    "email": "Tanggal: " + hariTanggalTeks,
+    "client": "Tim Kerja: " + timFound,
+    "client_address": "Shift: " + targetShift,
+    "client_address2": "Total DT: " + totalDTHariIni.toLocaleString("id-ID") + " Menit",
+    "client_address3": "Status: ACTIVE",
+    "items": itemsInvoiceJson,
+    "wip_breakdown": wipBreakdownTable, // Data for the NEW WIP breakdown table
+    "gross_total": totalDTHariIni,
+    "total_hasil": totalHasilGlobal,
+    "total_reject": totalRejectGlobal,
+    "total_wip": totalWipGlobal
+  };
+
+  var urlFileJadi = createCraftPdfFromAccounts(dataMurniInvoice);
+  if (urlFileJadi) {
+    Logger.log("CraftMyPDF Sukses! URL Berkas Jadi: " + urlFileJadi);
+  } else {
+    Logger.log("CraftMyPDF Terjadi Gangguan di semua akun.");
+  }
+
+  // Tembak murni gambar ke WhatsApp tanpa spam teks
+  try { 
+    UrlFetchApp.fetch(CONFIG_SHIFT.WEBHOOK_URL, {
+      "method": "post", "contentType": "application/json",
+      "payload": JSON.stringify({ "message": "", "targetJid": CONFIG_SHIFT.GROUP_RCVC, "fileUrl": urlFileJadi, "isPdf": false })
+    });
+    Logger.log("Paket Sukses Terkirim Menuju WhatsApp VPS!");
+  } catch (e) { Logger.log("WhatsApp Webhook Error: " + e.message); }
+}
+
+function createCraftPdfFromAccounts(dataMurniInvoice) {
+  var accounts = CONFIG_SHIFT.CRAFT_ACCOUNTS || [];
+  if (accounts.length === 0) {
+    accounts = [{
+      name: "Primary",
+      apiKey: CONFIG_SHIFT.CRAFT_API_KEY,
+      templateId: CONFIG_SHIFT.CRAFT_TEMPLATE_ID
+    }];
+  }
+
+  var lastError = "";
+  for (var a = 0; a < accounts.length; a++) {
+    var account = accounts[a];
+    try {
+      var craftOptions = {
+        "method": "post",
+        "contentType": "application/json",
+        "headers": { "X-API-KEY": account.apiKey },
+        "payload": JSON.stringify({
+          "template_id": account.templateId,
+          "export_type": "json",
+          "data": dataMurniInvoice
+        })
+      };
+
+      var responseCraft = UrlFetchApp.fetch("https://api.craftmypdf.com/v1/create-image", craftOptions);
+      var responseCode = responseCraft.getResponseCode();
+      var responseText = responseCraft.getContentText();
+      var parsedResponse = responseText ? JSON.parse(responseText) : {};
+
+      if (responseCode >= 400) {
+        lastError = "HTTP " + responseCode + " - " + responseText;
+        Logger.log("CraftMyPDF gagal lewat akun " + account.name + ": " + lastError);
+        continue;
+      }
+
+      if (parsedResponse && parsedResponse.file) {
+        Logger.log("CraftMyPDF sukses lewat akun " + account.name + ".");
+        return parsedResponse.file;
+      }
+
+      lastError = parsedResponse && parsedResponse.error ? parsedResponse.error : responseText;
+      Logger.log("CraftMyPDF gagal lewat akun " + account.name + ": " + lastError);
+    } catch (err) {
+      lastError = err && err.message ? err.message : String(err);
+      Logger.log("CraftMyPDF gagal lewat akun " + account.name + ": " + lastError);
+    }
+  }
+
+  Logger.log("CraftMyPDF gagal di semua akun. Error terakhir: " + lastError);
+  return "";
+}
+
+function parseNumericCell(cell) {
+  if (cell === null || cell === undefined || cell === "") return 0;
+  if (cell instanceof Date) return 0; 
+  if (typeof cell === 'number') return cell < 0 ? 0 : Math.round(cell);
+  var str = cell.toString().trim();
+  if (str.indexOf('-') !== -1 || str.indexOf('–') !== -1 || str.indexOf('—') !== -1 || str.indexOf('(') !== -1) return 0;
+  var clean = str.replace(/[^0-9]/g, '');
+  if (clean === "") return 0;
+  var num = Number(clean);
+  return (isNaN(num) || num < 0 || num > 1000000) ? 0 : num;
+}
+
+function parseTimeStr(val) {
+  if (!val) return "";
+  if (val instanceof Date) return Utilities.formatDate(val, "GMT+7", "HH:mm");
+  var str = val.toString().trim();
+  if (str.includes('T')) return str.split('T')[1].substring(0, 5);
+  str = str.replace('.', ':');
+  if (str.includes(':')) {
+    var parts = str.split(':');
+    if (parts.length >= 2) {
+      var hh = parts[0].trim().padStart(2, '0');
+      var mm = parts[1].trim().substring(0, 2).padStart(2, '0');
+      if (!isNaN(hh) && !isNaN(mm)) return hh + ":" + mm;
+    }
+  }
+  return "";
+}
