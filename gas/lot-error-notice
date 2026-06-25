@@ -1,4 +1,4 @@
-const NODE_SERVER_URL = "http://35.226.129.149:8080/";
+const NODE_SERVER_URL = "CONTACT_ME_FOR_URL/";
 const GROUP_RCVC = "628817433101-1550727854@g.us"; 
 
 // ID Spreadsheet Database Anda
