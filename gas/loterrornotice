@@ -1,0 +1,254 @@
+const NODE_SERVER_URL = "http://35.226.129.149:8080/";
+const GROUP_RCVC = "628817433101-1550727854@g.us"; 
+
+// ID Spreadsheet Database Anda
+const DB_SPREADSHEET_ID = "1Yj71BU8FosDF_V1u2VykFznvkOg_jq25Ls0qv7x9RsA";
+const DB_SHEET_NAME = "PASTE NAV";
+
+// =========================================================================
+// 1. SCRIPT YANG SUDAH BERJALAN (T3 / T4 AUTOMATIC TRIGGER ONEDIT)
+// =========================================================================
+function manualTriggerSend(e) {
+    if (!e) return;
+    
+    const range = e.range;
+    const sheet = range.getSheet();
+    const sheetName = sheet.getName().toUpperCase().trim(); 
+    const col = range.getColumn();
+    const row = range.getRow();
+
+    // Validasi Input: Hanya jalan jika Kolom V (22) di Sheet T3 atau T4 diisi
+    if ((sheetName === "T3" || sheetName === "T4") && col === 22) {
+        
+        let lot = range.getValue().toString().trim().toUpperCase();
+        
+        if (lot === "") {
+            console.log("🗑️ Kolom Lot dikosongkan. Mengabaikan trigger.");
+            return;
+        }
+
+        console.log("🔔 Triggered | Sheet: " + sheetName + " | Row: " + row + " | Checking Lot: [" + lot + "]");
+
+        let dbSheet;
+        try {
+            dbSheet = SpreadsheetApp.openById(DB_SPREADSHEET_ID).getSheetByName(DB_SHEET_NAME);
+        } catch(err) {
+            console.error("❌ Gagal membuka Spreadsheet Database: " + err.toString());
+            return;
+        }
+
+        if (!dbSheet) {
+            console.error("❌ Sheet '" + DB_SHEET_NAME + "' tidak ditemukan di database!");
+            return;
+        }
+
+        const lastRow = dbSheet.getLastRow();
+        let lotFound = false;
+
+        if (lastRow > 0) {
+            const dbLots = dbSheet.getRange(1, 5, lastRow, 1).getValues();
+            for (let i = 0; i < dbLots.length; i++) {
+                if (dbLots[i][0].toString().trim().toUpperCase() === lot) {
+                    lotFound = true;
+                    break;
+                }
+            }
+        }
+
+        const lineValue = sheet.getRange(row, 3).getValue().toString().trim().toUpperCase();
+        const itemValue = sheet.getRange(row, 7).getValue().toString().trim();
+
+        if (!lotFound) {
+            console.log("🚨 Lot tidak ditemukan di Database NAV! Mengirim WhatsApp...");
+
+            const time = Utilities.formatDate(new Date(), "GMT+7", "dd-MM HH:mm");
+            const alertMsg = `⚠️ *LOT NOT FOUND IN NAV DATABASE*\n\n` +
+                             `👤 *Input Lot:* "${lot}"\n` +
+                             `📦 *Item:* ${itemValue || "-"}\n` +
+                             `🏢 *Line:* ${lineValue || "-"}\n` +
+                             `📍 *Loc:* ${sheetName} (Row ${row})\n` +
+                             `🕒 *Time:* ${time}`;
+
+            try {
+                const response = UrlFetchApp.fetch(NODE_SERVER_URL, {
+                    "method": "post",
+                    "contentType": "application/json",
+                    "payload": JSON.stringify({ 
+                        "message": alertMsg, 
+                        "targetJid": GROUP_RCVC 
+                    }),
+                    "muteHttpExceptions": true
+                });
+                console.log("✅ Server Response: " + response.getContentText());
+            } catch (err) {
+                console.error("❌ Fetch Error: " + err.toString());
+            }
+        } else {
+            console.log("✅ Lot [" + lot + "] terverifikasi di Database NAV. Sistem aman.");
+        }
+    }
+}
+
+// =========================================================================
+// 2. SCRIPT BARU: LAPORAN HASIL TREATING (RANGKUMAN PER SHIFT - FIXED DATE)
+// =========================================================================
+function sendShiftReportWhatsApp() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("T3"); // Pastikan nama sheet sesuai
+  const lastRow = sheet.getLastRow();
+  
+  if (lastRow < 2) {
+    console.log("Tidak ada data ditemukan di sheet.");
+    return;
+  }
+
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
+  
+  const now = new Date();
+  const currentHour = now.getHours();
+  let targetShift = "";
+  let isManualTest = false;
+  
+  // Format Tanggal Hari Ini (Harus sama dengan format ketikan di sheet Anda, misal: dd/MM/yyyy)
+  const todayStr = Utilities.formatDate(now, Session.getScriptTimeZone(), "dd/MM/yyyy");
+
+  // Penentuan shift berdasarkan jam pemicu otomatis
+  if (currentHour >= 5 && currentHour <= 7) {
+    targetShift = "1";
+  } else if (currentHour >= 13 && currentHour <= 15) {
+    targetShift = "2";
+  } else if (currentHour >= 21 && currentHour <= 23) {
+    targetShift = "3";
+  } else {
+    // Mode Test Manual (Mencari shift terakhir yang diinput khusus HARI INI)
+    isManualTest = true;
+    for (let i = dataRange.length - 1; i >= 0; i--) {
+      if (dataRange[i][0] !== "") {
+        const checkDate = Utilities.formatDate(new Date(dataRange[i][0]), Session.getScriptTimeZone(), "dd/MM/yyyy");
+        if (checkDate === todayStr && dataRange[i][3] !== "") {
+          targetShift = dataRange[i][3].toString().trim();
+          break;
+        }
+      }
+    }
+  }
+
+  // Jika di hari ini belum ada input sama sekali (saat test manual)
+  if (targetShift === "") {
+    console.log(`⚠️ Mode Test: Tidak ada data lot/shift yang diinput untuk tanggal hari ini (${todayStr}). Skenario dihentikan agar tidak menarik data tahun lalu.`);
+    return;
+  }
+
+  console.log(`Target Pencarian: Tanggal ${todayStr} | Shift ${targetShift}` + (isManualTest ? " (Mode Test Manual)" : " (Mode Otomatis)"));
+
+  let totalMenitDT = 0;
+  let daftarAlasan = [];
+  let timFound = "-";
+  let tanggalStr = "";
+  let shiftFound = "";
+  let lastValidTim = "-";
+  let lastValidDate = "-";
+
+  // Loop akumulasi data baris berantai
+  for (let i = 0; i < dataRange.length; i++) {
+    const row = dataRange[i];
+    
+    if (row[0] !== "") {
+      lastValidDate = Utilities.formatDate(new Date(row[0]), Session.getScriptTimeZone(), "dd/MM/yyyy");
+      lastValidTim = row[2];
+      shiftFound = row[3].toString().trim();
+    }
+
+    // KRITIKAL: Sekarang wajib COCOK TANGGAL hari ini DAN COCOK SHIFT target
+    if (lastValidDate === todayStr && shiftFound == targetShift) {
+      if (timFound === "-") timFound = lastValidTim;
+      if (tanggalStr === "") tanggalStr = lastValidDate;
+
+      const alasanDT = row[8];
+      const jamMulai = row[9];
+      const jamAkhir = row[10];
+
+      if (jamMulai && jamAkhir) {
+        const strMulai = formatTimeStr(jamMulai);
+        const strAkhir = formatTimeStr(jamAkhir);
+
+        const [hStart, mStart] = strMulai.split(':').map(Number);
+        const [hEnd, mEnd] = strAkhir.split(':').map(Number);
+
+        let totalMenitMulai = (hStart * 60) + mStart;
+        let totalMenitAkhir = (hEnd * 60) + mEnd;
+
+        if (totalMenitAkhir < totalMenitMulai) {
+          totalMenitAkhir += 24 * 60; 
+        }
+
+        const selisih = totalMenitAkhir - totalMenitMulai;
+        totalMenitDT += selisih;
+
+        if (alasanDT) {
+          daftarAlasan.push(`${alasanDT} (${strMulai}-${strAkhir})`);
+        }
+      } else if (alasanDT && !jamMulai) {
+        daftarAlasan.push(alasanDT);
+      }
+    }
+  }
+
+  if (tanggalStr === "") {
+    console.log(`Tidak ditemukan aktivitas data yang cocok untuk Shift ${targetShift} pada tanggal ${todayStr}`);
+    return;
+  }
+
+  // Hitung konversi total downtime harian
+  let infoDT = "-";
+  if (totalMenitDT > 0 || daftarAlasan.length > 0) {
+    const hours = Math.floor(totalMenitDT / 60);
+    const mins = totalMenitDT % 60;
+    
+    let durasiStr = "";
+    if (hours > 0) durasiStr += `${hours} jam `;
+    if (mins > 0 || hours === 0) durasiStr += `${mins} menit`;
+    
+    infoDT = durasiStr.trim();
+    if (daftarAlasan.length > 0) {
+      infoDT += `\nDetail Kendala:\n- ${daftarAlasan.join('\n- ')}`;
+    }
+  }
+
+  const parts = tanggalStr.split('/');
+  const dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
+  const hariTanggalTeks = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  // Konstruksi Pesan Laporan
+  const messageText = `*" Laporan Hasil Treating - A1 "*\n\n` +
+                      `Hari & Tanggal  = ${hariTanggalTeks}\n` +
+                      `Shift                 = ${targetShift}\n` +
+                      `Tim                    = ${timFound}\n` +
+                      `Jam Kerja         = 7 jam\n` +
+                      `Total DT            = ${infoDT}`;
+
+  // Kirim Payload
+  try {
+    const response = UrlFetchApp.fetch(NODE_SERVER_URL, {
+        "method": "post",
+        "contentType": "application/json",
+        "payload": JSON.stringify({ 
+            "message": messageText, 
+            "targetJid": GROUP_RCVC 
+        }),
+        "muteHttpExceptions": true
+    });
+    console.log("✅ Laporan Shift Sukses Dikirim! Response: " + response.getContentText());
+  } catch (err) {
+    console.error("❌ Gagal mengirim Laporan Shift: " + err.toString());
+  }
+}
+
+// =========================================================================
+// FUNGSI PEMBANTU (WAJIB ADA DI PALING BAWAH SCRIPT AGAR TIDAK ERROR)
+// =========================================================================
+function formatTimeStr(val) {
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, Session.getScriptTimeZone(), "HH:mm");
+  }
+  return val.toString().trim();
+}
