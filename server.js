@@ -20,6 +20,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ORIGINAL_BOT_URL = "https://script.google.com/macros/s/AKfycbyknMRVxLOwYy_jwMaOuaQsL_a4Rjwr5eX_9lNMmO64vpoAcKxDsd_x8yQJw85te4M0/exec";
 const DEPT_NOTICE_NUMBER = "6285933263178@s.whatsapp.net";
 const WEBHOOK_PORT = 8080;
+const CONS_BOT_URL = "https://script.google.com/macros/s/AKfycbxNmbulcsd2osMSQqXeaelJFqMuNKojfHJJC-COo0SzrckAGybo3ES8rKN9aVhbljRjpA/exec";
 
 if (!GEMINI_API_KEY) {
     console.error("❌ ERROR: GEMINI_API_KEY tidak ditemukan di environment! Pastikan file .env sudah dibuat.");
@@ -234,7 +235,7 @@ async function startSystem() {
                 }
 
                 // Kirim data JSON ke Google Apps Script Webhook
-                const res = await axios.post(ORIGINAL_BOT_URL, { 
+                const res = await axios.post(CONS_BOT_URL, { 
                     command: "/cons", 
                     itemCode: itemCode, 
                     sender: jid 
