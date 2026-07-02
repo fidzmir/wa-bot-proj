@@ -218,7 +218,51 @@ async function startSystem() {
             }
         }
         // ====================================================================
-        
+        // ==================== [ HANDLER /CONS ] ====================
+        if (text.toLowerCase().startsWith("/cons ")) {
+            try {
+                // Beri efek ketik di WhatsApp agar user tahu bot sedang bekerja
+                await sock.sendPresenceUpdate('composing', jid);
+                
+                // Mengambil Kode Item setelah kata "/cons "
+                const args = text.split(" ");
+                const itemCode = args.slice(1).join(" ").trim().toUpperCase();
+
+                // Validasi input awal jika kosong
+                if (!itemCode) {
+                    return await sock.sendMessage(jid, { text: "⚠️ Format salah. Contoh: */cons T325112626N*" });
+                }
+
+                // Kirim data JSON ke Google Apps Script Webhook
+                const res = await axios.post(ORIGINAL_BOT_URL, { 
+                    command: "/cons", 
+                    itemCode: itemCode, 
+                    sender: jid 
+                }, { timeout: 20000 }); // Ditambah ke 20 detik karena Apps Script akan memproses banyak sheet mesin
+                
+                console.log("Respons /cons dari Google:", JSON.stringify(res.data));
+                
+                // Menangani respons balik dari Google Spreadsheet ke WhatsApp
+                if (res && res.data && res.data.type === 'text') {
+                    return await sock.sendMessage(jid, { text: res.data.content });
+                } 
+                else if (res && typeof res.data === 'string') {
+                    return await sock.sendMessage(jid, { text: res.data });
+                }
+                else if (res && res.data && (res.data.text || res.data.message)) {
+                    return await sock.sendMessage(jid, { text: res.data.text || res.data.message });
+                }
+                else {
+                    return await sock.sendMessage(jid, { text: `⚠️ Format respons dari Google tidak dikenali.` });
+                }
+            } catch (error) {
+                console.error("❌ Error pada fitur /cons:", error.message);
+                return await sock.sendMessage(jid, { 
+                    text: "⚠️ Koneksi ke Google Spreadsheet sibuk/timeout saat memproses breakdown data. Silakan coba lagi!" 
+                });
+            }
+        }
+// ==========================================================
         // 3. Handle command /openlist
         if (text.toLowerCase() === "/openlist") {
             return await handleOpenList(sock, jid);
